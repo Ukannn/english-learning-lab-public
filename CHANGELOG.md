@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Align repository names with English Learning Lab: the private source is `english-learning-lab`, and the sanitized public distribution is `english-learning-lab-public`. Update repository documentation and the public README template; product version and deployment targets remain unchanged.
+
 ## [0.18.11] - 2026-10-10
 
 - Add a themed question navigator to review sets and lessons, with a desktop side panel and collapsible mobile card. Keep drafts when jumping, and show completed answers read-only.

@@ -1,4 +1,6 @@
-# English Review App
+# English Learning Lab
+
+Public source distribution: [Ukannn/english-learning-lab-public](https://github.com/Ukannn/english-learning-lab-public).
 
 界面沿用韩语项目的五页结构：今日学习、语料、学习报告、学习资料库、同步与设置。桌面侧栏与手机底栏共享导航，答题与批改留在今日学习，候选确认位于资料库，素材生成位于设置。统一使用暖纸色、衬线标题与深蓝强调色，并提供深色模式；E / 书页 Logo 同步用于网页、登录页与安装图标。
 

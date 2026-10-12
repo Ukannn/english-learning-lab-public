@@ -7,31 +7,23 @@ import { CHATGPT_COMMAND } from "./AiJobPanel";
 import type { AiJob } from "../lib/contracts";
 afterEach(cleanup);
 const job = (id: string): AiJob => ({ok:true,jobId:`job-${id}`,subjectId:id,kind:"context_extract",snapshotHash:"hash",batchId:"batch",expectedCount:6,status:"prepared"});
-it("prepares every pending context with one click, reuses existing work and copies once", async () => {
-  const api={...demoApi,getPendingAiJobs:vi.fn(async()=>({ok:true,items:[job("a")]})),createAiJob:vi.fn(async(_kind:AiJob["kind"],_count?:number|null,id?:string|null)=>job(id!))};
+it("reads automatically queued work and copies without a preparation click", async () => {
+  const api={...demoApi,getPendingAiJobs:vi.fn(async()=>({ok:true,items:[job("a"),job("b")]})),createAiJob:vi.fn()};
   const user=userEvent.setup();
-  render(<ContextBatchPanel api={api} contextIds={["a","b","c"]} onRefresh={vi.fn(async()=>{})}/>);
-  const button=await screen.findByRole("button",{name:"整理剩余 2 条语料"});
+  render(<ContextBatchPanel api={api} contextIds={["a","b"]} onRefresh={vi.fn(async()=>{})}/>);
+  await screen.findByText("已有 2 条语料等待 ChatGPT 处理。");
+  const button=screen.getByRole("button",{name:"复制给 ChatGPT"});
   await waitFor(()=>expect((button as HTMLButtonElement).disabled).toBe(false));
   await user.click(button);
-  await screen.findByText("已有 3 条语料等待 ChatGPT 处理。");
-  expect(api.createAiJob.mock.calls.map(call=>call[2])).toEqual(["b","c"]);
-  await user.click(screen.getByRole("button",{name:"复制给 ChatGPT"}));
   expect(await navigator.clipboard.readText()).toBe(CHATGPT_COMMAND);
+  expect(api.createAiJob).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button",{name:/整理/})).toBeNull();
 });
-it("keeps successful tasks and retries failed work with the same key", async () => {
-  const pending:AiJob[]=[];
-  let fail=true;
-  const api={...demoApi,getPendingAiJobs:vi.fn(async()=>({ok:true,items:[...pending]})),createAiJob:vi.fn(async(_kind:AiJob["kind"],_count?:number|null,id?:string|null,_key?:string)=>{
-    if(id==="b"&&fail){fail=false;throw new Error("offline");}
-    const created=job(id!);pending.push(created);return created;
-  })};
-  const user=userEvent.setup();render(<ContextBatchPanel api={api} contextIds={["a","b","c"]} onRefresh={vi.fn(async()=>{})}/>);
-  const button=await screen.findByRole("button",{name:"一次整理全部 3 条语料"});
+it("keeps the unified command available before the scheduled job exists",async()=>{
+  const api={...demoApi,getPendingAiJobs:vi.fn(async()=>({ok:true,items:[]})),createAiJob:vi.fn()};
+  render(<ContextBatchPanel api={api} contextIds={["new"]} onRefresh={vi.fn(async()=>{})}/>);
+  const button=await screen.findByRole("button",{name:"复制给 ChatGPT"});
   await waitFor(()=>expect((button as HTMLButtonElement).disabled).toBe(false));
-  await user.click(button);await screen.findByText(/1 条语料准备失败/);
-  await user.click(screen.getByRole("button",{name:"整理剩余 1 条语料"}));
-  await screen.findByText("已有 3 条语料等待 ChatGPT 处理。");
-  expect(api.createAiJob.mock.calls.map(call=>call[2])).toEqual(["a","b","c","b"]);
-  expect(api.createAiJob.mock.calls[1]![3]).toBe(api.createAiJob.mock.calls[3]![3]);
+  expect(screen.getByRole("textbox").getAttribute("readonly")).not.toBeNull();
+  expect(api.createAiJob).not.toHaveBeenCalled();
 });

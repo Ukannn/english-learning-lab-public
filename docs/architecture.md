@@ -52,3 +52,7 @@ The visual language follows the Korean app: warm paper surfaces, serif display h
 ## V3 deployment and rollback boundary
 
 Apply the additive migration before deploying compatible frontend code. Existing owners receive disabled v3 generation; enable `v3_learning_settings.enabled` after the frontend is verified. Turning it off stops new v3 generation while existing prepared jobs and sessions remain resumable. Do not revert schema or delete learning evidence. Existing scores and due dates are unchanged by the migration. Docker is supported for isolated tests only; there is no database backup pipeline.
+
+## Automatic corpus jobs
+
+Pending contexts are frozen into AI jobs daily at 04:00 Asia/Shanghai (20:00 UTC). Reading the existing pending-job RPC also enqueues newly captured contexts. Empty queues create no jobs, concurrent calls share an owner lock, and existing snapshots are never extended. English keeps its per-context contract; Korean creates one independent batch for newly pending contexts. AI generation remains in the connected ChatGPT workflow; candidate acceptance remains a learner decision. Cancelled work can requeue if its context returns to pending; discard/undo excludes the source.

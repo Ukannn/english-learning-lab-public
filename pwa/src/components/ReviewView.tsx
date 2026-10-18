@@ -8,6 +8,7 @@ import { makeIdempotencyKey, sha256Jsonb } from "../lib/hash";
 import { clearRecovery, loadRecovery, recordActivity, saveRecovery, syncPendingActivities } from "../lib/recovery";
 import { useReviewPosition } from "../lib/useReviewPosition";
 import { QuestionNavigator } from "./QuestionNavigator";
+import { assertAuthGeneration, captureAuthGeneration, isAuthGenerationCurrent } from "../lib/authGeneration";
 
 interface Props { api: ApiClient; bootstrap: ReviewBootstrap; onClose(): void; onSubmitted(submissionId: string): void; headerAction?: ReactNode }
 function cloudAnswers(bootstrap: ReviewBootstrap) {
@@ -15,6 +16,7 @@ function cloudAnswers(bootstrap: ReviewBootstrap) {
 }
 export function ReviewView({api,bootstrap,onClose,onSubmitted,headerAction}:Props) {
   const session=bootstrap.session!;
+  const authGeneration=useRef(captureAuthGeneration());
   const questions=useMemo(()=>[...bootstrap.questions].sort((a,b)=>Number(Boolean(a.isNew))-Number(Boolean(b.isNew))||a.position-b.position),[bootstrap.questions]);
   const {selectedQuestion,selectQuestion}=useReviewPosition(session.id,questions);
   const index=Math.max(0,questions.findIndex(q=>q.id===selectedQuestion?.id));
@@ -41,8 +43,8 @@ export function ReviewView({api,bootstrap,onClose,onSubmitted,headerAction}:Prop
 
   useEffect(()=>{
     let active=true;
-    void loadRecovery(session.id).then(recovery=>{
-      if(!active||!recovery)return;
+    void loadRecovery(session.id,authGeneration.current).then(recovery=>{
+      if(!active||!isAuthGenerationCurrent(authGeneration.current)||!recovery)return;
       const next=cloudAnswers(bootstrap);const collisions:CheckpointAnswer[]=[];
       for(const local of recovery.answers){
         const target=questions.find(q=>q.position===local.position);
@@ -58,13 +60,13 @@ export function ReviewView({api,bootstrap,onClose,onSubmitted,headerAction}:Prop
       setSessionRevision(session.revision);
       setHintCounts(current=>{const merged={...current};for(const [position,count] of Object.entries(recovery.hintCounts??{}))merged[Number(position)]=Math.max(merged[Number(position)]??0,count);return merged;});
       setLearned(current=>new Set([...current,...(recovery.learnedPositions??[])]));
-    }).catch(()=>{if(active)setError("本机恢复记录暂时无法读取，请重试后继续。");}).finally(()=>{if(active)setRestoring(false);});
+    }).catch(()=>{if(active&&isAuthGenerationCurrent(authGeneration.current))setError("本机恢复记录暂时无法读取，请重试后继续。");}).finally(()=>{if(active&&isAuthGenerationCurrent(authGeneration.current))setRestoring(false);});
     return()=>{active=false;};
   },[session.id]);
   useEffect(()=>{
     // A count change keeps the session mounted. Rebase only after local writes finish,
     // and never let a response fetched before a checkpoint roll its revision back.
-    if(lastBootstrap.current===bootstrap||restoring||syncing||submitting||revealing)return;
+    if(!isAuthGenerationCurrent(authGeneration.current)||lastBootstrap.current===bootstrap||restoring||syncing||submitting||revealing)return;
     lastBootstrap.current=bootstrap;
     if(session.revision<sessionRevision)return;
     const next=cloudAnswers(bootstrap);const collisions=new Map<number,CheckpointAnswer>();
@@ -82,22 +84,24 @@ export function ReviewView({api,bootstrap,onClose,onSubmitted,headerAction}:Prop
     setError(null);
   },[bootstrap,session.revision,sessionRevision,questions,answers,conflicts,restoring,syncing,submitting,revealing]);
   useEffect(()=>{questionStartedAt.current=new Date().toISOString();},[question.position,Boolean(studyQuestion)]);
-  useEffect(()=>{const sync=()=>{void syncPendingActivities(api).catch(()=>undefined);};window.addEventListener("online",sync);sync();return()=>window.removeEventListener("online",sync);},[api]);
+  useEffect(()=>{const sync=()=>{if(isAuthGenerationCurrent(authGeneration.current))void syncPendingActivities(api,authGeneration.current).catch(()=>undefined);};window.addEventListener("online",sync);sync();return()=>window.removeEventListener("online",sync);},[api]);
   const orderedAnswers=useMemo(()=>Array.from(answers.values()).sort((a,b)=>a.position-b.position),[answers]);
   async function persist(nextAnswers=answers,nextCheckpointed=checkpointed,nextRevision=sessionRevision,nextHints=hintCounts,nextLearned=learned){
     const snapshot={sessionId:session.id,sessionRevision:nextRevision,answers:Array.from(nextAnswers.values()),checkpointedPositions:Array.from(nextCheckpointed),updatedAt:new Date().toISOString(),hintCounts:nextHints,learnedPositions:Array.from(nextLearned),reviewWork:{inputs:inputsRef.current}};
-    const save=writeChain.current.catch(()=>undefined).then(()=>saveRecovery(snapshot));writeChain.current=save;await save;
+    const save=writeChain.current.catch(()=>undefined).then(()=>saveRecovery(snapshot,authGeneration.current));writeChain.current=save;await save;assertAuthGeneration(authGeneration.current);
   }
   async function checkpoint(batch:CheckpointAnswer[],snapshot=answers){
-    if(!batch.length||syncingRef.current||conflicts.length)return;
+    if(!isAuthGenerationCurrent(authGeneration.current)||!batch.length||syncingRef.current||conflicts.length)return;
     syncingRef.current=true;setSyncing(true);setError(null);
     try{
       const frozenHash=await sha256Jsonb(batch);const signature=`${sessionRevision}:${frozenHash}`;
       if(pendingRequest.current?.signature!==signature)pendingRequest.current={signature,key:makeIdempotencyKey(`checkpoint:${session.id}`)};
+      assertAuthGeneration(authGeneration.current);
       const result=await api.checkpointAnswers({sessionId:session.id,answers:batch,sessionRevision,idempotencyKey:pendingRequest.current.key,frozenHash});
+      assertAuthGeneration(authGeneration.current);
       const next=new Set(checkpointed);batch.forEach(answer=>next.add(answer.position));setCheckpointed(next);setSessionRevision(result.revision);pendingRequest.current=null;await persist(snapshot,next,result.revision);
-    }catch(caught){setError((caught instanceof Error?caught.message:"同步未完成")+"。答案保存在本机。可重试同步；若其他设备已修改，请返回首页重新打开。");}
-    finally{syncingRef.current=false;setSyncing(false);}
+    }catch(caught){if(isAuthGenerationCurrent(authGeneration.current))setError((caught instanceof Error?caught.message:"同步未完成")+"。答案保存在本机。可重试同步；若其他设备已修改，请返回首页重新打开。");}
+    finally{syncingRef.current=false;if(isAuthGenerationCurrent(authGeneration.current))setSyncing(false);}
   }
   async function reveal(){
     const value=input.trim();if(!value||isRevealed||restoring||conflicts.length||revealing)return;
@@ -105,7 +109,7 @@ export function ReviewView({api,bootstrap,onClose,onSubmitted,headerAction}:Prop
     try{
       const revision=1;const answer:CheckpointAnswer={position:question.position,answer:value,revision,revealHash:await sha256Jsonb({sessionId:session.id,position:question.position,answer:value,revision}),clientInstanceId:clientInstanceId.current,pageStartedAt:pageStartedAt.current,practiceStartedAt:questionStartedAt.current,practiceEndedAt:new Date().toISOString(),hintUsed:(hintCounts[question.position]??0)>0,hintCount:hintCounts[question.position]??0,learningCardViewed:learned.has(question.position)};
       const next=new Map(answers).set(question.position,answer);
-      await persist(next);setAnswers(next);void recordActivity(api,session.id,question.position,"reveal").catch(()=>setError("活动记录未保存，请保持页面打开并重试同步。"));
+      await persist(next);setAnswers(next);void recordActivity(api,session.id,question.position,"reveal",1,authGeneration.current).catch(()=>{if(isAuthGenerationCurrent(authGeneration.current))setError("活动记录未保存，请保持页面打开并重试同步。");});
       const pending=Array.from(next.values()).filter(entry=>!checkpointed.has(entry.position)).sort((a,b)=>a.position-b.position);
       if(pending.length>=5)void checkpoint(pending.slice(0,5),next);
     }catch{setError("本机保存失败。请保持页面打开，检查浏览器存储后重试。");}
@@ -113,19 +117,20 @@ export function ReviewView({api,bootstrap,onClose,onSubmitted,headerAction}:Prop
   }
   async function hint(){
     const count=Math.min((question.hints??[]).length,(hintCounts[question.position]??0)+1);const next={...hintCounts,[question.position]:count};
-    try{await persist(answers,checkpointed,sessionRevision,next);setHintCounts(next);void recordActivity(api,session.id,question.position,"hint",count);}catch{setError("提示记录无法保存，请重试。");}
+    try{await persist(answers,checkpointed,sessionRevision,next);setHintCounts(next);void recordActivity(api,session.id,question.position,"hint",count,authGeneration.current).catch(()=>undefined);}catch{if(isAuthGenerationCurrent(authGeneration.current))setError("提示记录无法保存，请重试。");}
   }
   async function study(){
     if(!studyQuestion)return;const next=new Set(learned).add(studyQuestion.position);
-    try{await persist(answers,checkpointed,sessionRevision,hintCounts,next);setLearned(next);void recordActivity(api,session.id,studyQuestion.position,"study");}catch{setError("学习卡记录无法保存，请重试。");}
+    try{await persist(answers,checkpointed,sessionRevision,hintCounts,next);setLearned(next);void recordActivity(api,session.id,studyQuestion.position,"study",1,authGeneration.current).catch(()=>undefined);}catch{if(isAuthGenerationCurrent(authGeneration.current))setError("学习卡记录无法保存，请重试。");}
   }
   async function submit(){
     if(!allRevealed||submitting||syncingRef.current||conflicts.length)return;setSubmitting(true);setError(null);
     try{
-      await syncPendingActivities(api);
+      await syncPendingActivities(api,authGeneration.current);
       const frozenRows=await Promise.all(orderedAnswers.map(async answer=>{const target=questions.find(q=>q.position===answer.position)!;return{position:answer.position,questionId:target.id,answer:answer.answer,revision:answer.revision,answerHash:await sha256Jsonb({questionId:target.id,answer:answer.answer,revision:answer.revision})};}));
-      const result=await api.submitSession({sessionId:session.id,answers:orderedAnswers.filter(answer=>!checkpointed.has(answer.position)),sessionRevision,idempotencyKey:submitKey.current,frozenHash:await sha256Jsonb(frozenRows)});
-      await writeChain.current;await clearRecovery(session.id);selectQuestion();onSubmitted(result.submissionId);
+      const frozenHash=await sha256Jsonb(frozenRows);assertAuthGeneration(authGeneration.current);
+      const result=await api.submitSession({sessionId:session.id,answers:orderedAnswers.filter(answer=>!checkpointed.has(answer.position)),sessionRevision,idempotencyKey:submitKey.current,frozenHash});
+      assertAuthGeneration(authGeneration.current);await writeChain.current;await clearRecovery(session.id,authGeneration.current);assertAuthGeneration(authGeneration.current);selectQuestion();onSubmitted(result.submissionId);
     }catch(caught){setError((caught instanceof Error?caught.message:"提交未完成")+"。请重试；若其他设备已修改，请返回首页重新打开。");}
     finally{setSubmitting(false);}
   }

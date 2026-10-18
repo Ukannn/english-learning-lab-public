@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReviewQuestion } from "./contracts";
+import { captureAuthGeneration, isAuthGenerationCurrent } from "./authGeneration";
 
 const key = (sessionId: string) => `english-review-position:v1:${sessionId}`;
 
@@ -8,6 +9,7 @@ export function clearReviewPosition(sessionId: string) {
 }
 
 export function useReviewPosition(sessionId: string, questions: ReviewQuestion[]) {
+  const authGeneration = useRef(captureAuthGeneration());
   const [selected, setSelected] = useState<{ id: string; position: number } | null>(() => {
     try {
       const saved = JSON.parse(sessionStorage.getItem(key(sessionId)) ?? "null");
@@ -16,6 +18,7 @@ export function useReviewPosition(sessionId: string, questions: ReviewQuestion[]
   });
   const selectedQuestion = questions.find(q => q.id === selected?.id && q.position === selected?.position);
   function selectQuestion(question?: ReviewQuestion) {
+    if (!isAuthGenerationCurrent(authGeneration.current)) return;
     const next = question ? { id: question.id, position: question.position } : null;
     setSelected(next);
     try {

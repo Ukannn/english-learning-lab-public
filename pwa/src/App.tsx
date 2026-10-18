@@ -10,6 +10,7 @@ import type { ApiClient, DashboardData, ReviewBootstrap } from "./lib/contracts"
 import { demoApi } from "./lib/demoApi";
 import { designDemoApi } from "./lib/designDemo";
 import { clearAllRecovery } from "./lib/recovery";
+import { captureAuthGeneration, isAuthGenerationCurrent, scopeApiClient } from "./lib/authGeneration";
 import { RecordsView } from "./components/RecordsView";
 import { usePhraseInventory } from "./lib/usePhraseInventory";
 import { applyTheme, readThemePreference, THEME_STORAGE_KEY } from "./lib/theme";
@@ -24,7 +25,9 @@ export function App() {
   return <AuthGate demo={demo}><LearningApp client={client} demo={demo} /></AuthGate>;
 }
 
-export function LearningApp({ client, demo }: { client: ApiClient; demo: boolean }) {
+export function LearningApp({ client: sourceClient, demo }: { client: ApiClient; demo: boolean }) {
+  const authGeneration = useRef(captureAuthGeneration());
+  const client = useMemo(() => scopeApiClient(sourceClient, authGeneration.current), [sourceClient]);
   const [view, setView] = useState<ViewId>(routeFromHash);
   const [online, setOnline] = useState(navigator.onLine);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -32,20 +35,23 @@ export function LearningApp({ client, demo }: { client: ApiClient; demo: boolean
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dataRevision, setDataRevision] = useState(0);
+  const [signingOut, setSigningOut] = useState(false);
+  const signOutPending = useRef(false);
   const [recordsQuery, setRecordsQuery] = useState(() => routeFromHash() === "history" ? location.hash.split("?")[1] ?? "" : "");
   const recordsLocation = useRef(routeFromHash() === "history" ? location.hash : "#history");
   const positions = useRef<Partial<Record<ViewId, number>>>({});
   const previousView = useRef(view);
   const inventory = usePhraseInventory(client, view === "analytics" || view === "history", dataRevision);
   const refresh = useCallback(async () => {
+    if (!isAuthGenerationCurrent(authGeneration.current)) return;
     setLoading(true); setError(null);
     try {
       // The queue must be ready before dashboard totals are read.
       setBootstrap(await client.getReviewBootstrap());
       setDashboard(await client.getDashboard());
       setDataRevision(value => value + 1);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "内容加载失败，请重试。"); }
-    finally { setLoading(false); }
+    } catch (caught) { if (isAuthGenerationCurrent(authGeneration.current)) setError(caught instanceof Error ? caught.message : "内容加载失败，请重试。"); }
+    finally { if (isAuthGenerationCurrent(authGeneration.current)) setLoading(false); }
   }, [client]);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
@@ -87,9 +93,16 @@ export function LearningApp({ client, demo }: { client: ApiClient; demo: boolean
     window.history.replaceState(window.history.state, "", hash);
   }
   async function signOut() {
-    try { const result = await supabase?.auth.signOut(); if (result?.error) throw result.error; await clearAllRecovery(); }
+    if (signOutPending.current) return;
+    signOutPending.current = true; setSigningOut(true); setError(null);
+    // Clear starts before the network request. Its completion must never run after
+    // a later login and erase that login's new drafts.
+    const cleared = clearAllRecovery();
+    try { const [, result] = await Promise.all([cleared, supabase?.auth.signOut()]); if (result?.error) throw result.error; }
     catch (caught) { setError(caught instanceof Error ? caught.message : "退出失败，请重试。"); }
+    finally { signOutPending.current = false; }
   }
+  if (signingOut) return <main className="center-state"><p role="status">{error || "正在退出…"}</p>{error && <button className="secondary-button" onClick={() => void signOut()}>重试退出</button>}</main>;
   return <AppShell activeView={view} onNavigate={navigate} online={online} demo={demo} onSignOut={demo ? undefined : () => void signOut()}>
     {error && <div className="notice notice--red" role="alert"><span>{error}</span><button className="text-button" onClick={() => void refresh()}>重试</button></div>}
     {/* Keep the active question mounted when visiting another top-level page. */}

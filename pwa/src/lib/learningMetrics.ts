@@ -44,7 +44,8 @@ export function dueSchedule(items: PhraseSummary[], today: string, count: 7 | 30
 }
 
 export function reportDays(dashboard: DashboardData) {
-  const v3 = dashboard.v3 && (dashboard.v3.completedLessons > 0 || dashboard.v3.days.some(d => d.attempts > 0));
+  const v3 = dashboard.v3 && (dashboard.v3.completedLessons > 0 || (dashboard.v3.unallocatedReadingSeconds ?? 0) > 0
+    || dashboard.v3.days.some(d => d.attempts > 0 || d.durationMinutes !== null));
   return { version: v3 ? "english_v3" : dashboard.analytics?.ruleVersion ?? "english_v2", days: [...(v3 ? dashboard.v3!.days : dashboard.analytics?.days ?? [])].sort((a, b) => a.date.localeCompare(b.date)), v3: Boolean(v3) };
 }
 

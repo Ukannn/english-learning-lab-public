@@ -1,5 +1,6 @@
 import type { CheckpointAnswer, ReviewBootstrap } from "./contracts";
 import type { RecoveryState } from "./recovery";
+import { mergeReadingTime } from "./readingDates";
 
 // Cloud checkpoints are authoritative; unsynced answers and unrevealed input stay local.
 export function mergeLessonRecovery(bootstrap: ReviewBootstrap, local: RecoveryState | null) {
@@ -31,7 +32,9 @@ export function mergeLessonRecovery(bootstrap: ReviewBootstrap, local: RecoveryS
     }
   }
   for (const answer of localAnswers.values()) if (!answers.has(answer.position)) answers.set(answer.position, answer);
-  seconds.reading = Math.max(seconds.reading ?? 0, bootstrap.lesson?.readingSeconds ?? 0);
-  return {answers, checkpointed, hintCounts, learnedPositions: [...learned], inputs, seconds, conflictingAnswers,
+  const reading = mergeReadingTime(seconds.reading, local?.lessonWork?.readingSecondsByDate,
+    bootstrap.lesson?.readingSeconds, bootstrap.lesson?.readingSecondsByDate);
+  seconds.reading = reading.seconds;
+  return {answers, checkpointed, hintCounts, learnedPositions: [...learned], inputs, seconds, readingSecondsByDate: reading.byDate, conflictingAnswers,
     sessionRevision: Math.max(bootstrap.session!.revision, local?.sessionRevision ?? 0)};
 }

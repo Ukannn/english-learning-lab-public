@@ -15,6 +15,37 @@ async function clickWhenReady(name:string) {
 afterEach(cleanup);
 beforeEach(()=>{sessionStorage.clear();vi.clearAllMocks();vi.mocked(loadRecovery).mockResolvedValue(null);});
 describe("lesson phases and evidence",()=>{
+ it("can complete reading and submit after two devices exceed the shared reading budget",async()=>{
+  const boot=b();boot.questions=[];boot.lesson={...boot.lesson!,readingStarted:true,readingSeconds:6000,
+    readingSecondsByDate:{"2026-10-17":6000},material:{title:"Long resumed reading",kind:"passage",body:"Reading text",targetPhraseIds:[],notes:[],explanationZh:"帮助"}};
+  vi.mocked(loadRecovery).mockResolvedValue({sessionId:"s",sessionRevision:1,answers:[],checkpointedPositions:[],updatedAt:"now",
+    lessonWork:{inputs:{},seconds:{reading:6000},readingSecondsByDate:{"2026-10-18":6000}}});
+  const {api,onSubmitted,onRefresh}=setup(boot);
+  vi.mocked(api.recordLessonActivity!).mockImplementation(async(_sessionId,_action,total,_burden,_key,dates)=>{
+    if(total>7200||Object.values(dates??{}).reduce((sum,value)=>sum+value,0)>total)throw new Error("INVALID_READING_DATES");
+    return {ok:true};
+  });
+  await screen.findByText("Long resumed reading");
+  expect(screen.getByText(/已达到120分钟的记录上限，仍可继续/)).toBeTruthy();
+  await clickWhenReady("收起原文，试着回应");
+  await waitFor(()=>expect(onRefresh).toHaveBeenCalledTimes(1));
+  expect(api.recordLessonActivity).toHaveBeenCalledWith("s","reading_complete",7200,null,
+    expect.any(String),{"2026-10-17":6000,"2026-10-18":1200});
+  await clickWhenReady("结束本次并批改已答内容");
+  await waitFor(()=>expect(onSubmitted).toHaveBeenCalledWith("sub"));
+  expect(api.recordLessonActivity).toHaveBeenCalledWith("s","reading_time",7200,null,
+    expect.any(String),{"2026-10-17":6000,"2026-10-18":1200});
+ });
+ it("resumes dated reading without assigning old reading totals to today",async()=>{
+  const boot=b();boot.questions=[];boot.lesson={...boot.lesson!,readingStarted:true,readingSeconds:75,
+    material:{title:"Resumed reading",kind:"passage",body:"Reading text",targetPhraseIds:[],notes:[],explanationZh:"帮助"}};
+  vi.mocked(loadRecovery).mockResolvedValue({sessionId:"s",sessionRevision:1,answers:[],checkpointedPositions:[],updatedAt:"now",
+    lessonWork:{inputs:{},seconds:{reading:85},readingSecondsByDate:{"2026-10-18":10}}});
+  const {api}=setup(boot);await screen.findByText("Resumed reading");await clickWhenReady("收起原文，试着回应");
+  await waitFor(()=>expect(api.recordLessonActivity).toHaveBeenCalledWith("s","reading_complete",85,null,
+    expect.stringMatching(/^lesson:s:reading_complete:/),{"2026-10-18":10}));
+ });
+
  it("jumps among review questions while retaining drafts and reading gates",async()=>{
   const boot=b();boot.questions=[q(1),q(2),q(3,"expression"),q(4,"expression")];const {api}=setup(boot);await screen.findByText("任务 1");
   fireEvent.change(screen.getByRole("textbox"),{target:{value:"draft one"}});
@@ -41,9 +72,9 @@ describe("lesson phases and evidence",()=>{
   fireEvent.click(screen.getByRole("button",{name:"第 1 题 · 已作答"}));await screen.findByText("参考表达");await clickWhenReady("继续");await screen.findByText("任务 2");
  });
 
- it("keeps private rubric and material hidden until review is saved",async()=>{const {api}=setup();await screen.findByText("任务 1");expect(screen.queryByText("private answer leak")).toBeNull();expect(screen.queryByText("Story")).toBeNull();fireEvent.click(screen.getByText("跳过"));await screen.findByText("开始阅读");await clickWhenReady("开始阅读");await screen.findByText("Story");expect(api.checkpointAnswers).toHaveBeenCalled();expect(api.recordLessonActivity).toHaveBeenCalledWith("s","reading_start",0,null,"lesson:s:reading_start:0");});
+ it("keeps private rubric and material hidden until review is saved",async()=>{const {api}=setup();await screen.findByText("任务 1");expect(screen.queryByText("private answer leak")).toBeNull();expect(screen.queryByText("Story")).toBeNull();fireEvent.click(screen.getByText("跳过"));await screen.findByText("开始阅读");await clickWhenReady("开始阅读");await screen.findByText("Story");expect(api.checkpointAnswers).toHaveBeenCalled();expect(api.recordLessonActivity).toHaveBeenCalledWith("s","reading_start",0,null,expect.stringMatching(/^lesson:s:reading_start:/),{});});
  it("freezes dont_know separately from skipped and submits a partial lesson",async()=>{const {api}=setup();await screen.findByText("任务 1");fireEvent.click(screen.getByText("暂时不会"));await screen.findByText("参考表达");await clickWhenReady("结束本次并批改已答内容");await waitFor(()=>expect(api.submitSession).toHaveBeenCalled());const batch=vi.mocked(api.checkpointAnswers).mock.calls.flatMap(call=>call[0].answers);expect(batch.map(a=>a.attemptState)).toEqual(["dont_know","skipped","skipped"]);expect(batch.map(a=>a.answer)).toEqual(["","",""]);});
- it("persists unrevealed text and restores it",async()=>{vi.mocked(loadRecovery).mockResolvedValue({sessionId:"s",sessionRevision:1,answers:[],checkpointedPositions:[],updatedAt:"now",lessonWork:{inputs:{1:"my draft"},seconds:{1:12}}});setup();await screen.findByDisplayValue("my draft");fireEvent.change(screen.getByRole("textbox"),{target:{value:"changed draft"}});await waitFor(()=>expect(saveRecovery).toHaveBeenCalledWith(expect.objectContaining({lessonWork:expect.objectContaining({inputs:{1:"changed draft"}})})));});
+ it("persists unrevealed text and restores it",async()=>{vi.mocked(loadRecovery).mockResolvedValue({sessionId:"s",sessionRevision:1,answers:[],checkpointedPositions:[],updatedAt:"now",lessonWork:{inputs:{1:"my draft"},seconds:{1:12}}});setup();await screen.findByDisplayValue("my draft");fireEvent.change(screen.getByRole("textbox"),{target:{value:"changed draft"}});await waitFor(()=>expect(saveRecovery).toHaveBeenCalledWith(expect.objectContaining({lessonWork:expect.objectContaining({inputs:{1:"changed draft"}})}),expect.any(Number)));});
  it("does not treat a hidden learning card as independent prior knowledge",async()=>{const boot=b();boot.questions[0]={...boot.questions[0],isNew:true,learningCard:{meaningZh:"按计划运行",example:"The task ran as scheduled.",usageNote:"按安排"}};setup(boot);await screen.findByText("先熟悉这个表达");expect(screen.queryByRole("textbox")).toBeNull();fireEvent.click(screen.getByText("隐藏学习卡，试着回忆"));await screen.findByRole("textbox");});
  it("preserves conflicting local and cloud answers until explicitly resolved",async()=>{const boot=b();boot.questions[0]={...boot.questions[0],draft:{answer:"cloud answer",revision:1,answerHash:"hash",status:"checkpointed",attemptState:"answered",activeSeconds:8}};vi.mocked(loadRecovery).mockResolvedValue({sessionId:"s",sessionRevision:1,answers:[{position:1,answer:"local answer",revision:1,revealHash:"hash",attemptState:"answered",activeSeconds:7,clientInstanceId:"test",pageStartedAt:"now"}],checkpointedPositions:[],updatedAt:"now"});setup(boot);await screen.findByText("请先核对不同设备的答案");expect(screen.getByText(/local answer/)).toBeTruthy();expect(screen.getByText(/cloud answer/)).toBeTruthy();expect(saveRecovery).not.toHaveBeenCalled();fireEvent.click(screen.getByText("已核对，继续云端进度"));await screen.findByText("开始阅读");});
 

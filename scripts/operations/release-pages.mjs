@@ -3,6 +3,7 @@ import path from 'node:path';
 import {spawnSync,execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {assertProductionSource} from './git-release-gate.mjs';
+import {assertProductionCi} from './ci-release-gate.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const args=process.argv.slice(2),get=name=>args.includes(name)?args[args.indexOf(name)+1]:undefined;
@@ -18,7 +19,7 @@ if(key.startsWith('eyJ')) {
   if(claims.role!=='anon'||claims.ref!==projectRef)throw new Error('The legacy key must be this project’s anon key.');
 }
 if(environment==='production') {
-  assertProductionSource(root);
+  assertProductionCi(root, assertProductionSource(root));
   if(!get('--reconciliation'))throw new Error('Production requires the final remote reconciliation report.');
   const report=JSON.parse(fs.readFileSync(get('--reconciliation'),'utf8'));
   if(report.ok!==true||report.activeLegacyCount!==0||report.rawMismatchCount!==0||report.missingRawRows!==0||report.ownerRegistered!==true)

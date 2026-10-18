@@ -4,10 +4,14 @@ export class ActiveTime {
   private lastInteraction: number;
   constructor(now = Date.now()) { this.lastTick = now; this.lastInteraction = now; }
   interact(now = Date.now()) { this.lastInteraction = now; }
-  tick(eligible: boolean, now = Date.now()): number {
+  sample(eligible: boolean, now = Date.now()): { startedAt: number; endedAt: number; seconds: number } | null {
     const start = this.lastTick;
     this.lastTick = now;
-    if (!eligible) return 0;
-    return Math.max(0, Math.min(now, this.lastInteraction + 60_000) - start) / 1000;
+    const end = Math.min(now, this.lastInteraction + 60_000);
+    if (!eligible || end <= start) return null;
+    return { startedAt: start, endedAt: end, seconds: (end - start) / 1000 };
+  }
+  tick(eligible: boolean, now = Date.now()): number {
+    return this.sample(eligible, now)?.seconds ?? 0;
   }
 }

@@ -45,3 +45,14 @@ it("keeps old and new scoring versions out of the same curve", async () => {
   expect(report.version).toBe("english_v3");
   expect(report.days.some(d => d.independentAttempts === 999)).toBe(false);
 });
+it("shows committed reading time even when every question was skipped", async () => {
+  const dashboard = await designDemoApi.getDashboard();
+  dashboard.v3!.completedLessons = 0;
+  dashboard.v3!.days.forEach(day => { day.attempts = 0; day.independentAttempts = 0; day.independentSuccess = 0; day.expressionAttempts = 0; day.expressionSuccess = 0; });
+  expect(reportDays(dashboard).version).toBe("english_v3");
+  dashboard.v3!.days.forEach(day => { day.durationMinutes = null; });
+  dashboard.v3!.unallocatedReadingSeconds = 90;
+  expect(reportDays(dashboard).v3).toBe(true);
+  dashboard.v3!.unallocatedReadingSeconds = 0;
+  expect(reportDays(dashboard).v3).toBe(false);
+});

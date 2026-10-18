@@ -4,6 +4,13 @@
 
 - Align repository names with English Learning Lab: the private source is `english-learning-lab`, and the sanitized public distribution is `english-learning-lab-public`. Update repository documentation and the public README template; product version and deployment targets remain unchanged.
 
+## [0.18.13] - 2026-10-18
+
+- Keep logout final: late checkpoints and queued activity cannot recreate cleared local drafts.
+- Count answer time on its actual practice day and record new reading time in daily buckets; preserve older reading time whose date is unknown.
+- Give different senses of one expression independent learning progress and reuse existing senses when adding another source.
+- Require both application checks and database integration tests from the latest successful main CI attempt before production deployment.
+
 ## [0.18.11] - 2026-10-10
 
 - Add a themed question navigator to review sets and lessons, with a desktop side panel and collapsible mobile card. Keep drafts when jumping, and show completed answers read-only.

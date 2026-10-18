@@ -52,7 +52,7 @@ function previewGrades(): GradeStatus[] {
 export const designDemoApi: ApiClient = {
   ...demoApi,
   async getReviewBootstrap() { const next = structuredClone(bootstrap), variants = previewGrades(); next.questions.forEach((question, i) => { if (question.draft) question.draft.answer = variants[i].observedAnswer ?? ""; }); return next; },
-  async getDashboard() { return structuredClone(dashboard); },
+  async getDashboard() { const next = structuredClone(dashboard); if (new URLSearchParams(location.search).get("time") === "undated") next.v3!.unallocatedReadingSeconds = 90; return next; },
   async getSubmissionStatus() { return { ...structuredClone(feedback), grades: previewGrades() }; },
   async recordLessonActivity() { return { ok: true }; },
   async setLearningSettings() { return { ok: true, defaultCount: 8, revision: 2 }; },

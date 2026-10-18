@@ -46,6 +46,7 @@ const copyEntries = [
   'docs/architecture.md',
   'docs/legacy-architecture.md',
   'docs/learning-policy.md',
+  'docs/sense-identity.md',
   'docs/v0.15-content-review.md',
   'CHANGELOG.md',
   'package.json',

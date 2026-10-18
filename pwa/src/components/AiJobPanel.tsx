@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CopyButton } from "./CopyButton";
 import type { AiJob, AiJobPrompt, ApiClient } from "../lib/contracts";
 import { makeIdempotencyKey } from "../lib/hash";
+import { captureAuthGeneration, isAuthGenerationCurrent } from "../lib/authGeneration";
 
 export const CHATGPT_COMMAND = "处理 English Learning Lab 当前等待任务，并通过现有 API 合同写入后读回验证。";
 const jobLabels: Record<AiJob["kind"], string> = { context_extract: "整理这段语料", candidate_generate: "补充学习候选", question_prepare: "生成今天的题目", grade_submission: "批改本次答案" };
@@ -14,6 +15,7 @@ export function AiJobPanel(props: Props) {
 
 function AiJobPanelContent({ api, kind, subjectId = null, requestedCount = null, onImported }: Props) {
   const [job, setJob] = useState<AiJobPrompt | null>(null);
+  const authGeneration = useRef(captureAuthGeneration());
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const active = useRef(false);
@@ -25,14 +27,14 @@ function AiJobPanelContent({ api, kind, subjectId = null, requestedCount = null,
   const storageKey = `english-review:ai-job:${kind}:${subjectId ?? "default"}`;
 
   async function receive(next: AiJobPrompt) {
-    if (!active.current) return;
+    if (!active.current || !isAuthGenerationCurrent(authGeneration.current)) return;
     setJob(next);
     if (closed(next.status)) localStorage.removeItem(storageKey);
     else localStorage.setItem(storageKey, next.jobId);
     if (next.status === "consumed" && completed.current !== next.jobId) {
       // The server is authoritative: copying a command never marks a task done.
       await onComplete.current?.();
-      if (!active.current) return;
+      if (!active.current || !isAuthGenerationCurrent(authGeneration.current)) return;
       completed.current = next.jobId;
       requestKey.current = makeIdempotencyKey(kind);
       setMessage("已保存，学习内容已更新。");
@@ -50,7 +52,7 @@ function AiJobPanelContent({ api, kind, subjectId = null, requestedCount = null,
     async function restore() {
       try {
         const pending = await api.getPendingAiJobs();
-        if (disposed) return;
+        if (disposed || !isAuthGenerationCurrent(authGeneration.current)) return;
         const id = pending.items.find(item => item.kind === kind && (item.subjectId ?? null) === subjectId)?.jobId ?? localStorage.getItem(storageKey);
         if (id) {
           const next = await api.getAiJobPrompt(id);
@@ -67,11 +69,11 @@ function AiJobPanelContent({ api, kind, subjectId = null, requestedCount = null,
   }, [api, storageKey, kind, subjectId]);
 
   async function prepare() {
-    if (operation.current) return;
+    if (operation.current || !isAuthGenerationCurrent(authGeneration.current)) return;
     operation.current = true; setBusy(true); setMessage(null);
     try {
       const created = await api.createAiJob(kind, requestedCount, subjectId, requestKey.current);
-      if (!active.current) return;
+      if (!active.current || !isAuthGenerationCurrent(authGeneration.current)) return;
       localStorage.setItem(storageKey, created.jobId);
       await receive(await api.getAiJobPrompt(created.jobId));
     } catch (error) {
@@ -82,7 +84,7 @@ function AiJobPanelContent({ api, kind, subjectId = null, requestedCount = null,
   }
 
   async function check(silent = false) {
-    if (!job || operation.current) return;
+    if (!job || operation.current || !isAuthGenerationCurrent(authGeneration.current)) return;
     operation.current = true;
     if (!silent) setBusy(true);
     try {
@@ -105,7 +107,7 @@ function AiJobPanelContent({ api, kind, subjectId = null, requestedCount = null,
   }, [api, job]);
 
   async function cancel() {
-    if (!job || operation.current) return;
+    if (!job || operation.current || !isAuthGenerationCurrent(authGeneration.current)) return;
     operation.current = true; setBusy(true);
     try {
       await api.cancelAiJob(job.jobId);

@@ -276,14 +276,16 @@ export interface Lesson {
   id: string; theme: "life" | "work"; sequence: number;
   material: { title: string; kind: "dialogue" | "passage"; body: string; explanationZh: string; targetPhraseIds: string[]; notes: Array<{phraseId: string; explanationZh: string}> } | null;
   readingStarted: boolean; readingCompleted: boolean; readingSeconds: number; burden: "light" | "right" | "heavy" | null;
+  readingSecondsByDate?: Record<string, number>;
 }
 export interface LessonAnalytics {
   completedLessons: number; dueCount: number;
+  unallocatedReadingSeconds?: number;
   days: Array<{date: string; independentAttempts: number; independentSuccess: number; hinted: number; attempts: number; gapAttempts: number; gapSuccess: number; expressionAttempts: number; expressionSuccess: number; unmeasured: number; delayedAttempts: number; delayedSuccess: number; durationMinutes: number | null}>;
   burden: Array<{date: string; value: string}>;
 }
 export interface ApiClient {
-  recordLessonActivity?(sessionId: string, action: "reading_start" | "reading_complete" | "reading_time" | "burden", seconds: number, burden: string | null, idempotencyKey: string): Promise<{ok: boolean}>;
+  recordLessonActivity?(sessionId: string, action: "reading_start" | "reading_complete" | "reading_time" | "burden", seconds: number, burden: string | null, idempotencyKey: string, readingSecondsByDate?: Record<string, number>): Promise<{ok: boolean}>;
   setLearningSettings?(count: number, revision: number, idempotencyKey: string): Promise<{ok: boolean; defaultCount: number; revision: number}>;
   recordQuestionActivity(sessionId: string, position: number, action: "hint" | "study" | "reveal", idempotencyKey: string): Promise<{ok: boolean}>;
   getPendingAiJobs(): Promise<{ok: boolean; items: AiJob[]}>;
